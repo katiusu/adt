@@ -1,0 +1,9 @@
+event_id: test-1780b21b8441-36274641456-1
+repository: soobujmiah/adt
+commit: 1780b21b8441602f06dd27198686117f5b62da4e
+kind: test
+occurred_at: '2026-09-26T22:06:03Z'
+run_id: '36274641456'
+run_attempt: '1'
+status: passed
+summary: setup.sh unit tests (ci.yml)

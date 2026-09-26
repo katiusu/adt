@@ -1,13 +1,13 @@
 schema_version: 1
 project_id: adt
 repository: soobujmiah/adt
-generated_at: '2026-09-26T08:52:10Z'
+generated_at: '2026-09-26T22:06:03Z'
 generated_by: tools/repo_knowledge collect
-version: v35.0.2-49-g2f9631c
+version: v35.0.2-51-g1780b21
 head:
-  commit: 2f9631c35e53adbbf336e0615c019d1e6f3b61bc
+  commit: 1780b21b8441602f06dd27198686117f5b62da4e
   branch: main
-  committed_at: '2026-09-26T08:42:01Z'
+  committed_at: '2026-09-26T21:56:51Z'
 phases:
   source: not_configured
   completed: []
@@ -15,19 +15,25 @@ phases:
   next: null
 build:
   status: passed
-  run_id: '36230564143'
-  at: '2026-09-26T08:52:10Z'
+  run_id: '36274641456'
+  commit: 1780b21b8441602f06dd27198686117f5b62da4e
+  run_attempt: '1'
+  at: '2026-09-26T22:06:03Z'
+  timestamp_source: observed
 test:
   status: passed
-  run_id: null
-  at: '2026-09-26T08:52:10Z'
+  run_id: '36274641456'
+  commit: 1780b21b8441602f06dd27198686117f5b62da4e
+  run_attempt: '1'
+  at: '2026-09-26T22:06:03Z'
+  timestamp_source: observed
   summary: setup.sh unit tests (ci.yml)
 last_successful_build:
-  commit: 2f9631c35e53adbbf336e0615c019d1e6f3b61bc
-  at: '2026-09-26T08:52:10Z'
-  run_id: '36230564143'
+  commit: 1780b21b8441602f06dd27198686117f5b62da4e
+  at: '2026-09-26T22:06:03Z'
+  run_id: '36274641456'
 last_failed_build: null
 sync:
   status: ok
-  last_synced_at: '2026-09-26T08:52:10Z'
+  last_synced_at: '2026-09-26T22:06:03Z'
   source: ci
