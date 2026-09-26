@@ -2,83 +2,273 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Repo-Knowledge Project State (.repo/project.yaml)",
   "type": "object",
-  "required": ["schema_version", "project_id", "repository", "generated_at", "generated_by", "head", "build", "test", "sync"],
+  "required": [
+    "schema_version",
+    "project_id",
+    "repository",
+    "generated_at",
+    "generated_by",
+    "head",
+    "build",
+    "test",
+    "sync"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "project_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
-    "generated_at": {"type": "string", "format": "date-time"},
-    "generated_by": {"type": "string", "minLength": 1},
-    "version": {"type": ["string", "null"]},
+    "schema_version": {
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "generated_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "head": {
       "type": "object",
-      "required": ["commit", "branch", "committed_at"],
+      "required": [
+        "commit",
+        "branch",
+        "committed_at"
+      ],
       "properties": {
-        "commit": {"type": "string", "minLength": 7},
-        "branch": {"type": "string"},
-        "committed_at": {"type": "string", "format": "date-time"}
+        "commit": {
+          "type": "string",
+          "minLength": 7
+        },
+        "branch": {
+          "type": "string"
+        },
+        "committed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "additionalProperties": false
     },
     "phases": {
       "type": "object",
-      "required": ["source"],
+      "required": [
+        "source"
+      ],
       "properties": {
-        "source": {"enum": ["not_configured", ".repo/phases.yaml"]},
-        "completed": {"type": "array", "items": {"type": "string"}},
-        "active": {"type": ["string", "null"]},
-        "next": {"type": ["string", "null"]}
+        "source": {
+          "enum": [
+            "not_configured",
+            ".repo/phases.yaml"
+          ]
+        },
+        "completed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "active": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "build": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
-        "status": {"enum": ["passed", "failed", "unknown"]},
-        "run_id": {"type": ["string", "null"]},
-        "at": {"type": ["string", "null"], "format": "date-time"}
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "unknown"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_attempt": {
+          "type": "string"
+        },
+        "timestamp_source": {
+          "enum": [
+            "ci",
+            "observed",
+            "commit"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "test": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
-        "status": {"enum": ["passed", "failed", "unknown"]},
-        "summary": {"type": ["string", "null"]},
-        "run_id": {"type": ["string", "null"]},
-        "at": {"type": ["string", "null"], "format": "date-time"}
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "unknown"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_attempt": {
+          "type": "string"
+        },
+        "timestamp_source": {
+          "enum": [
+            "ci",
+            "observed",
+            "commit"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "last_successful_build": {
-      "type": ["object", "null"],
-      "required": ["commit", "at"],
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "commit",
+        "at"
+      ],
       "properties": {
-        "commit": {"type": "string"},
-        "at": {"type": "string", "format": "date-time"},
-        "run_id": {"type": ["string", "null"]}
+        "commit": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "last_failed_build": {
-      "type": ["object", "null"],
-      "required": ["commit", "at"],
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "commit",
+        "at"
+      ],
       "properties": {
-        "commit": {"type": "string"},
-        "at": {"type": "string", "format": "date-time"},
-        "run_id": {"type": ["string", "null"]}
+        "commit": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "sync": {
       "type": "object",
-      "required": ["status", "source"],
+      "required": [
+        "status",
+        "source"
+      ],
       "properties": {
-        "status": {"enum": ["ok", "pending", "failed"]},
-        "last_synced_at": {"type": ["string", "null"], "format": "date-time"},
-        "source": {"enum": ["local", "ci"]}
+        "status": {
+          "enum": [
+            "ok",
+            "pending",
+            "failed"
+          ]
+        },
+        "last_synced_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "source": {
+          "enum": [
+            "local",
+            "ci"
+          ]
+        }
       },
       "additionalProperties": false
     }

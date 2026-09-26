@@ -17,8 +17,8 @@ TOOL_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TOOL_DIR.parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.repo_knowledge import cli, core  # noqa: E402
-from tools.repo_knowledge.tests.test_core import make_git_repo  # noqa: E402
+from tools.repo_knowledge import cli, core
+from tools.repo_knowledge.tests.test_core import make_git_repo
 
 
 class CliTests(unittest.TestCase):

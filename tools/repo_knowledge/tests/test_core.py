@@ -20,7 +20,7 @@ TOOL_DIR = Path(__file__).resolve().parents[1]  # tools/repo_knowledge
 REPO_ROOT = TOOL_DIR.parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.repo_knowledge import core  # noqa: E402
+from tools.repo_knowledge import core
 
 
 def make_git_repo(path: Path) -> None:

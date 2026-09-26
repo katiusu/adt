@@ -1,0 +1,33 @@
+name: Repository State Contract
+on:
+  pull_request:
+  push:
+    paths:
+      - 'tools/repo_knowledge/**'
+      - 'tools/doc_bridge.py'
+      - 'schemas/project-*.schema.json'
+      - '.repo/**'
+      - 'README.md'
+      - '.github/workflows/repo-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repo-contract:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - run: python -m pip install --quiet pyyaml
+      - run: python3 -m unittest discover -s tools/repo_knowledge/tests -v
+      - run: python3 -m tools.repo_knowledge verify
+      - name: Verify unique identity-correct documentation bridge
+        run: |
+          id=$(python3 -c 'import yaml; print(yaml.safe_load(open(".repo/project.yaml"))["project_id"])')
+          python3 tools/doc_bridge.py check --strict --project-id "$id" README.md

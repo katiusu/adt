@@ -7,6 +7,10 @@ explicit "unknown"/None rather than guessing.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,18 +117,24 @@ def compute_phases(root: Path) -> dict[str, Any]:
     }
 
 
-def _run_block(
-    status: str | None,
-    run_id: str | None,
-    existing: dict[str, Any] | None,
-) -> dict[str, Any]:
+def _run_block(status, run_id, existing, *, head, run_attempt="1", observed_at=None):
     if status is None:
-        # No new result reported this invocation: keep whatever was already recorded rather
-        # than downgrading a known result to "unknown" just because this run didn't check it.
-        return existing or {"status": "unknown", "run_id": None, "at": None}
+        # Historical blocks remain historical: never attach today's commit to an
+        # earlier result whose original provenance was not recorded.
+        return copy.deepcopy(existing) if existing else {"status": "unknown", "run_id": None, "at": None}
     if status not in STATUS_VALUES:
         raise ValueError(f"invalid status {status!r}; expected one of {STATUS_VALUES}")
-    return {"status": status, "run_id": run_id, "at": now_iso()}
+    identity = {"status": status, "run_id": run_id, "commit": head["commit"],
+                "run_attempt": str(run_attempt)}
+    if existing and all(existing.get(k) == v for k, v in identity.items()):
+        if observed_at is not None and existing.get("at") != observed_at:
+            raise ValueError("same result identity has conflicting evidence timestamp")
+        return copy.deepcopy(existing)
+    # A CI invocation may supply the actual source run timestamp. Otherwise this
+    # is explicitly an observation time, not falsely a CI-completion timestamp.
+    at = observed_at or (now_iso() if run_id else head["committed_at"])
+    return {**identity, "at": at,
+            "timestamp_source": "ci" if observed_at else "observed" if run_id else "commit"}
 
 
 def build_project_state(
@@ -139,6 +149,10 @@ def build_project_state(
     test_status: str | None = None,
     test_run_id: str | None = None,
     test_summary: str | None = None,
+    run_attempt: str = "1",
+    build_at: str | None = None,
+    test_at: str | None = None,
+    source_commit: str | None = None,
 ) -> dict[str, Any]:
     """Compute the next .repo/project.yaml content.
 
@@ -149,9 +163,33 @@ def build_project_state(
     head = get_head(root)
     existing = existing or {}
 
-    build = _run_block(build_status, build_run_id, existing.get("build"))
+    if not head.get("commit") or not head.get("committed_at"):
+        raise ValueError("repository must have an initial commit before state collection")
+    # Ignore only a state-publication commit directly above the recorded source.
+    # Human .repo/phases.yaml changes and any source changes must remain visible.
+    old_head = existing.get("head") or {}
+    changed = run_git(["diff", "--name-only", old_head.get("commit") or "HEAD", "HEAD"], root)
+    generated_paths = lambda p: p in {".repo/project.yaml", ".repo/STATUS.md",
+        "public/verification.json", "app/verification-summary.json"} or p.startswith(".repo/events/")
+    if (old_head.get("commit") and changed and
+            all(generated_paths(p) for p in changed.splitlines()) and
+            (get_commit_summary(root) or "").startswith("chore(repo-knowledge):")):
+        head = copy.deepcopy(old_head)
+    if source_commit:
+        if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+            raise ValueError("source commit must be a full Git SHA")
+        if run_git(["merge-base", "HEAD", source_commit], root) != source_commit:
+            raise ValueError("CI source is not an ancestor of the checked-out branch")
+        delta = run_git(["diff", "--name-only", source_commit, "HEAD"], root)
+        if delta and not all(generated_paths(p) for p in delta.splitlines()):
+            raise ValueError("new source changes exist after this CI run; refusing stale publication")
+        at = run_git(["show", "-s", "--format=%cI", source_commit], root)
+        head = {"commit": source_commit, "branch": head["branch"], "committed_at": _to_utc_z(at)}
+    build = _run_block(build_status, build_run_id, existing.get("build"),
+                       head=head, run_attempt=run_attempt, observed_at=build_at)
     test_existing = existing.get("test")
-    test = _run_block(test_status, test_run_id, test_existing)
+    test = _run_block(test_status, test_run_id, test_existing,
+                      head=head, run_attempt=run_attempt, observed_at=test_at)
     if test_status is not None and test_summary is not None:
         test["summary"] = test_summary
     elif test_existing and "summary" in test_existing and test_status is None:
@@ -166,13 +204,14 @@ def build_project_state(
     elif build_status == "failed":
         last_failed_build = {"commit": head["commit"], "at": build["at"], "run_id": build_run_id}
 
+    generated_at = max(filter(None, [head.get("committed_at"), build.get("at"), test.get("at")]))
     return {
         "schema_version": SCHEMA_VERSION,
         "project_id": project_id,
         "repository": repository,
-        "generated_at": now_iso(),
+        "generated_at": generated_at,
         "generated_by": generated_by,
-        "version": get_version(root),
+        "version": run_git(["describe", "--tags", "--always", head["commit"]], root),
         "head": head,
         "phases": compute_phases(root),
         "build": build,
@@ -181,7 +220,7 @@ def build_project_state(
         "last_failed_build": last_failed_build,
         "sync": {
             "status": "ok",
-            "last_synced_at": now_iso(),
+            "last_synced_at": generated_at,
             "source": sync_source,
         },
     }
@@ -195,10 +234,14 @@ def make_event(
     summary: str | None = None,
     run_id: str | None = None,
     evidence_level: str | None = None,
+    occurred_at: str | None = None,
+    run_attempt: str = "1",
 ) -> dict[str, Any]:
-    occurred_at = now_iso()
-    short_commit = commit[:7] if commit else "unknown"
-    suffix = run_id or occurred_at.replace("-", "").replace(":", "").replace("T", "").replace("Z", "Z")
+    occurred_at = occurred_at or now_iso()
+    short_commit = commit[:12] if commit else "unknown"
+    # Local observation identity is content-derived. CI identities include attempt.
+    local = json.dumps([repository, commit, kind, status, summary, evidence_level], sort_keys=True)
+    suffix = f"{run_id}-{run_attempt}" if run_id else hashlib.sha256(local.encode()).hexdigest()[:16]
     event_id = f"{kind}-{short_commit}-{suffix}"
     event: dict[str, Any] = {
         "event_id": event_id,
@@ -207,6 +250,9 @@ def make_event(
         "kind": kind,
         "occurred_at": occurred_at,
     }
+    if run_id:
+        event["run_id"] = run_id
+        event["run_attempt"] = str(run_attempt)
     if status is not None:
         event["status"] = status
     if summary is not None:
