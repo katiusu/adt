@@ -4,13 +4,14 @@ SKB's convention (tools/continuity, scripts/) is stdlib-plus-PyYAML, no extra de
 This implements only the subset of JSON Schema draft 2020-12 that
 schemas/project-registry.schema.json and schemas/project-event.schema.json actually use:
 type, required, properties, additionalProperties, enum, const, pattern, minLength, format
-(date-time, checked structurally, not calendar-validated). It is not a general-purpose
+(date-time, UTC and calendar-validated). It is not a general-purpose
 validator and should not be reused for a schema outside this pair without re-checking coverage.
 """
 from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,16 +46,18 @@ def validate(instance: Any, schema: dict[str, Any], path: str = "$") -> list[str
         return errors
 
     if schema.get("format") == "date-time" and isinstance(instance, str):
-        if not _DATE_TIME_RE.match(instance):
-            errors.append(f"{path}: {instance!r} is not a Z-suffixed date-time")
+        try:
+            if not _DATE_TIME_RE.match(instance):
+                raise ValueError("not UTC Z form")
+            datetime.fromisoformat(instance.replace("Z", "+00:00"))
+        except ValueError:
+            errors.append(f"{path}: {instance!r} is not a valid Z-suffixed date-time")
 
-    if "pattern" in schema and isinstance(instance, str):
-        if not re.match(schema["pattern"], instance):
-            errors.append(f"{path}: {instance!r} does not match pattern {schema['pattern']!r}")
+    if "pattern" in schema and isinstance(instance, str) and not re.match(schema["pattern"], instance):
+        errors.append(f"{path}: {instance!r} does not match pattern {schema['pattern']!r}")
 
-    if "minLength" in schema and isinstance(instance, str):
-        if len(instance) < schema["minLength"]:
-            errors.append(f"{path}: {instance!r} shorter than minLength {schema['minLength']}")
+    if "minLength" in schema and isinstance(instance, str) and len(instance) < schema["minLength"]:
+        errors.append(f"{path}: {instance!r} shorter than minLength {schema['minLength']}")
 
     if isinstance(instance, dict):
         properties = schema.get("properties", {})

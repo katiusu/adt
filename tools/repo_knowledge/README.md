@@ -32,3 +32,22 @@ and `--project-id` from the repo name; override either flag if that inference is
 ```bash
 python3 -m unittest discover -s tools/repo_knowledge/tests -p 'test_*.py' -v
 ```
+
+## Retry and publication contract (audit remediation)
+
+- The persisted project ID is reused on later `collect`/`sync` calls; identity changes
+  require an explicit migration, not a silent override.
+- A result records its source commit, run ID and run attempt. Pass `--build-at` and
+  `--test-at` for source CI timestamps. Otherwise `timestamp_source` explicitly
+  distinguishes first observation time from a commit timestamp; neither is claimed
+  to be the CI completion time. Existing historical blocks are not assigned a new SHA.
+- Repeating identical Git/result identities preserves timestamps and event bytes.
+  A changed result for the same run/attempt is a conflict, not a silent rewrite.
+- Both `collect` and `sync` render STATUS.md. `sync` additionally records a state
+  transition event, not another event for every unchanged poll.
+- Candidate state and events are validated in a private staging directory under a
+  Git-directory lock. Linux `renameat2(RENAME_EXCHANGE)` publishes the complete .repo
+  directory atomically. Unsupported filesystems/platforms fail without replacing
+  existing state. An initial Git commit is required; bootstrap must create it first.
+- Readers must treat the `.repo` directory as one snapshot. Source/build/test data,
+  event history and STATUS.md are published together. Optional human phases survive.

@@ -2,25 +2,89 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Repo-Knowledge Event (.repo/events/*.yaml)",
   "type": "object",
-  "required": ["event_id", "repository", "commit", "kind", "occurred_at"],
+  "required": [
+    "event_id",
+    "repository",
+    "commit",
+    "kind",
+    "occurred_at"
+  ],
   "properties": {
-    "event_id": {"type": "string", "minLength": 1},
-    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
-    "commit": {"type": "string", "minLength": 7},
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$"
+    },
+    "commit": {
+      "type": "string",
+      "minLength": 7
+    },
     "kind": {
       "enum": [
-        "commit", "build", "test", "ci", "release", "phase_start", "phase_change",
-        "architecture_change", "device_validation", "documentation_change",
-        "milestone", "sync"
+        "commit",
+        "build",
+        "test",
+        "ci",
+        "release",
+        "phase_start",
+        "phase_change",
+        "architecture_change",
+        "device_validation",
+        "documentation_change",
+        "milestone",
+        "sync"
       ]
     },
-    "status": {"enum": ["passed", "failed", "started", "completed", "unknown"]},
-    "occurred_at": {"type": "string", "format": "date-time"},
-    "evidence_level": {"enum": ["source", "test", "ci", "emulator", "device", "release"]},
-    "summary": {"type": "string"},
-    "verification": {"type": "string"},
-    "source_paths": {"type": "array", "items": {"type": "string"}},
-    "supersedes": {"type": ["string", "null"]}
+    "status": {
+      "enum": [
+        "passed",
+        "failed",
+        "started",
+        "completed",
+        "unknown"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence_level": {
+      "enum": [
+        "source",
+        "test",
+        "ci",
+        "emulator",
+        "device",
+        "release"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "verification": {
+      "type": "string"
+    },
+    "source_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "run_attempt": {
+      "type": "string"
+    }
   },
   "additionalProperties": false
 }
