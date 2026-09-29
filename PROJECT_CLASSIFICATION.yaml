@@ -1,0 +1,55 @@
+# Canonical repository classification.
+#
+# This file is the ONLY carrier of the repository's canonical type. The type
+# vocabulary is the eleven-value enum in standards/repository-types/README.md,
+# enforced by scripts/repository_types.py.
+#
+# Owner: the project. Authority: standards/new-repository-standard.md,
+# standards/repository-membership.md, standards/repository-types/README.md.
+
+schema_version: 1
+standard_version: "1.0.0"
+template_version: "1.0.0"
+
+classification:
+  primary: "cli-tool"
+  secondary: []
+  risk_level: "LOW"
+  notes: "Bash/CLI releases (v35.0.2-v37.0.0) with native ARM64 assets. Type confirmed by the owner on 2026-09-30 during migration waves 2/3 (see governance/new-standard-migration-assessment.md in soobujmiah/skb). The risk_level, platform, data, capability and review fields below are set from the cli-tool type profile defaults and are PROVISIONAL pending owner review of this repository; they do not assert facts about its contents."
+
+platform:
+  targets: []
+  offline_capable: false
+  physical_device_required: false
+
+data:
+  source_types: []
+  sensitive_data: false
+  third_party_data: false
+  authenticated_sources: false
+
+capabilities:
+  network_access: false
+  privileged_android_apis: false
+  automation: false
+  ai_inference: false
+  file_import_export: false
+
+required_reviews:
+  security: false
+  privacy: false
+  legal: false
+  licensing: false
+  safety: false
+
+# Standards that apply to this repository. Populated from the type profile plus
+# any secondary capability tags. Never a free-form list of everything in SKB.
+selected_standards:
+  - "standards/new-repository-standard.md"
+  - "standards/repository-documentation-model.md"
+  - "standards/repository-lifecycle.md"
+  - "standards/repository-membership.md"
+  - "standards/repository-types/cli-tool.md"
+  - "standards/repository-visibility-and-public-projection.md"
+
+selected_template: "templates/project-repository"
