@@ -1,0 +1,8 @@
+event_id: commit-81a449ae6ad9-6dad27d529295047
+repository: soobujmiah/adt
+commit: 81a449ae6ad92b11b0826e5dc9cdb9c122ca65b5
+kind: commit
+occurred_at: '2026-09-29T17:16:42Z'
+status: completed
+summary: 'feat(repo-knowledge): upgrade vendored tooling, schemas, and final-run sync
+  contract'
