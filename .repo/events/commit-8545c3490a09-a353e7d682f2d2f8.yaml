@@ -1,0 +1,8 @@
+event_id: commit-8545c3490a09-a353e7d682f2d2f8
+repository: soobujmiah/adt
+commit: 8545c3490a09574cb371e13f87b7db16b369fc17
+kind: commit
+occurred_at: '2026-09-29T22:36:11Z'
+status: completed
+summary: Declare the repository's canonical type and add the documentation scaffold
+  (migration waves 2/3)
