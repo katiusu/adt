@@ -26,6 +26,10 @@ permissions:
   contents: write
   actions: read
 
+concurrency:
+  group: repo-state-main
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -78,7 +82,7 @@ jobs:
           test_job = next((j for j in jobs if j["name"] == "setup.sh unit tests"), None)
           build_jobs = [j for j in jobs if j["name"].startswith("Build (Linux ARM64)")]
 
-          test_status = {"success": "passed", "failure": "failed"}.get(
+          test_status = {"success": "passed", "failure": "failed", "cancelled": "cancelled", "skipped": "skipped", "timed_out": "timed_out"}.get(
               test_job["conclusion"] if test_job else None, ""
           )
 
@@ -104,6 +108,17 @@ jobs:
           if [ -n "${{ steps.derive.outputs.test_status }}" ]; then
             args+=(--test-status "${{ steps.derive.outputs.test_status }}" --test-summary "setup.sh unit tests (ci.yml)")
           fi
+          args+=(
+            --test-run-id "${{ github.event.workflow_run.id || github.run_id }}"
+            --run-attempt "${{ github.event.workflow_run.run_attempt || github.run_attempt }}"
+            --workflow-name "${{ github.event.workflow_run.name || github.workflow }}"
+            --workflow-id "${{ github.event.workflow_run.workflow_id || '' }}"
+            --event-type "${{ github.event.workflow_run.event || github.event_name }}"
+            --started-at "${{ github.event.workflow_run.run_started_at || '' }}"
+            --completed-at "${{ github.event.workflow_run.updated_at || '' }}"
+            --actor "${{ github.event.workflow_run.actor.login || github.actor }}"
+            --run-url "${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}"
+          )
           python3 -m tools.repo_knowledge sync "${args[@]}"
 
       - name: Verify .repo/ against schemas
@@ -113,9 +128,15 @@ jobs:
       - name: Commit updated .repo/ state
         if: >-
           always() &&
-          github.event_name == 'workflow_run' &&
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main'
+          ((github.event_name == 'workflow_run' &&
+            (github.event.workflow_run.event == 'push' ||
+             github.event.workflow_run.event == 'schedule' ||
+             github.event.workflow_run.event == 'workflow_dispatch' ||
+             github.event.workflow_run.event == 'repository_dispatch') &&
+            github.event.workflow_run.head_branch == 'main') ||
+           (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+        env:
+          SKB_DISPATCH_TOKEN: ${{ secrets.SKB_DISPATCH_TOKEN || secrets.SKB_RETURN_TOKEN || '' }}
         run: |
           set -euo pipefail
           if git diff --quiet -- .repo; then
@@ -127,3 +148,10 @@ jobs:
           git add .repo
           git commit -m "chore(repo-knowledge): sync deterministic state for ${{ github.event.workflow_run.head_sha }}"
           git push origin HEAD:main
+          if [ -n "$SKB_DISPATCH_TOKEN" ]; then
+            curl -fsSL -X POST \
+              -H "Authorization: Bearer $SKB_DISPATCH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/soobujmiah/skb/dispatches \
+              -d "{\"event_type\":\"repo-state-updated\",\"client_payload\":{\"project_id\":\"adt\",\"repository\":\"${{ github.repository }}\",\"run_id\":\"${{ github.event.workflow_run.id || github.run_id }}\",\"sha\":\"${{ github.event.workflow_run.head_sha || github.sha }}\"}}" || true
+          fi

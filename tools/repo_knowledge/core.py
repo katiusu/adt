@@ -22,7 +22,19 @@ except ImportError as exc:  # pragma: no cover - exercised only when PyYAML is m
     raise SystemExit("tools/repo_knowledge requires PyYAML (see tools/requirements.txt)") from exc
 
 SCHEMA_VERSION = 1
-STATUS_VALUES = ("passed", "failed", "unknown")
+STATUS_VALUES = ("passed", "failed", "cancelled", "skipped", "timed_out", "unknown")
+CONCLUSION_VALUES = (
+    "success",
+    "failure",
+    "cancelled",
+    "skipped",
+    "timed_out",
+    "action_required",
+    "neutral",
+    "stale",
+    "startup_failure",
+    "unknown",
+)
 
 
 def now_iso() -> str:
@@ -78,13 +90,38 @@ def dump_yaml(path: Path, data: dict[str, Any]) -> None:
         yaml.safe_dump(data, fh, sort_keys=False, default_flow_style=False)
 
 
-def compute_phases(root: Path) -> dict[str, Any]:
-    """Read the optional, human-authored .repo/phases.yaml and mark completion from tags.
+def _is_phase_completed(root: Path, phase: dict[str, Any], tags: set[str]) -> bool:
+    """Determine whether a declared phase in .repo/phases.yaml is completed.
 
-    A phase is "completed" only when its declared `complete_tag` exists in the repository's
-    tag list. Nothing here infers an active/next phase from anything but that same declared
-    order -- the first not-completed phase (if any) is "active" and the one after it is "next".
-    Never invents a phase name.
+    Supports:
+      1. Tag-gated completion (`complete_tag` present in repository git tags).
+      2. Evidence-gated completion (`status: completed` with optional `evidence_path`
+         and/or `commit` verified against the repository).
+    """
+    tag = phase.get("complete_tag")
+    if tag and tag in tags:
+        return True
+    raw_status = str(phase.get("status") or "").strip().lower()
+    if raw_status in ("completed", "complete", "done", "passed"):
+        ev_path = phase.get("evidence_path")
+        if ev_path and not (root / ev_path).exists():
+            return False
+        commit = phase.get("commit")
+        if commit:
+            if not re.fullmatch(r"[0-9a-f]{7,40}", str(commit)):
+                return False
+        return True
+    return False
+
+
+def compute_phases(root: Path) -> dict[str, Any]:
+    """Read the optional, human-authored .repo/phases.yaml and mark completion from tags or verified gates.
+
+    A phase is "completed" when its declared `complete_tag` exists in the repository's
+    tag list OR when its declared `status` is `completed` and any declared `evidence_path` /
+    `commit` is verified in the repository. Nothing here infers an active/next phase from
+    anything but that same declared order -- the first not-completed phase (if any) is
+    "active" and the one after it is "next". Never invents a phase name.
     """
     phases_path = root / ".repo" / "phases.yaml"
     declared = load_yaml(phases_path)
@@ -96,45 +133,91 @@ def compute_phases(root: Path) -> dict[str, Any]:
 
     ordered = declared["phases"]
     completed: list[str] = []
+    blocked: list[str] = []
     active: str | None = None
     next_phase: str | None = None
     for i, phase in enumerate(ordered):
-        name = phase["name"]
-        tag = phase.get("complete_tag")
-        if tag and tag in tags:
+        name = str(phase.get("name") or phase.get("id") or "")
+        if not name:
+            continue
+        if _is_phase_completed(root, phase, tags):
             completed.append(name)
             continue
+        raw_status = str(phase.get("status") or "").strip().lower()
+        if raw_status == "blocked":
+            blocked.append(name)
         if active is None:
             active = name
-            if i + 1 < len(ordered):
-                next_phase = ordered[i + 1]["name"]
-            break
-    return {
+            # Find the next non-completed phase after active
+            for j in range(i + 1, len(ordered)):
+                if not _is_phase_completed(root, ordered[j], tags):
+                    next_phase = str(ordered[j].get("name") or ordered[j].get("id") or "") or None
+                    break
+    result: dict[str, Any] = {
         "source": ".repo/phases.yaml",
         "completed": completed,
         "active": active,
         "next": next_phase,
     }
+    if blocked:
+        result["blocked"] = blocked
+    return result
 
 
-def _run_block(status, run_id, existing, *, head, run_attempt="1", observed_at=None):
+def _run_block(
+    status,
+    run_id,
+    existing,
+    *,
+    head,
+    run_attempt="1",
+    observed_at=None,
+    conclusion=None,
+    workflow_name=None,
+    workflow_id=None,
+    event_type=None,
+    started_at=None,
+    completed_at=None,
+    actor=None,
+    run_url=None,
+):
     if status is None:
         # Historical blocks remain historical: never attach today's commit to an
         # earlier result whose original provenance was not recorded.
         return copy.deepcopy(existing) if existing else {"status": "unknown", "run_id": None, "at": None}
     if status not in STATUS_VALUES:
         raise ValueError(f"invalid status {status!r}; expected one of {STATUS_VALUES}")
+    if conclusion is not None and conclusion not in CONCLUSION_VALUES:
+        raise ValueError(f"invalid conclusion {conclusion!r}; expected one of {CONCLUSION_VALUES}")
     identity = {"status": status, "run_id": run_id, "commit": head["commit"],
                 "run_attempt": str(run_attempt)}
-    if existing and all(existing.get(k) == v for k, v in identity.items()):
+    extra: dict[str, Any] = {}
+    for k, v in (
+        ("conclusion", conclusion),
+        ("workflow_name", workflow_name),
+        ("workflow_id", workflow_id),
+        ("event_type", event_type),
+        ("started_at", started_at),
+        ("completed_at", completed_at),
+        ("actor", actor),
+        ("run_url", run_url),
+    ):
+        if v not in (None, ""):
+            extra[k] = v
+    if existing and all(existing.get(k) == v for k, v in {**identity, **extra}.items()):
         if observed_at is not None and existing.get("at") != observed_at:
             raise ValueError("same result identity has conflicting evidence timestamp")
         return copy.deepcopy(existing)
     # A CI invocation may supply the actual source run timestamp. Otherwise this
     # is explicitly an observation time, not falsely a CI-completion timestamp.
     at = observed_at or (now_iso() if run_id else head["committed_at"])
-    return {**identity, "at": at,
-            "timestamp_source": "ci" if observed_at else "observed" if run_id else "commit"}
+    block = {
+        **identity,
+        "at": at,
+        "timestamp_source": "ci" if observed_at else "observed" if run_id else "commit",
+    }
+    block.update(extra)
+    return block
 
 
 def build_project_state(
@@ -153,6 +236,15 @@ def build_project_state(
     build_at: str | None = None,
     test_at: str | None = None,
     source_commit: str | None = None,
+    build_conclusion: str | None = None,
+    test_conclusion: str | None = None,
+    workflow_name: str | None = None,
+    workflow_id: str | None = None,
+    event_type: str | None = None,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+    actor: str | None = None,
+    run_url: str | None = None,
 ) -> dict[str, Any]:
     """Compute the next .repo/project.yaml content.
 
@@ -185,11 +277,39 @@ def build_project_state(
             raise ValueError("new source changes exist after this CI run; refusing stale publication")
         at = run_git(["show", "-s", "--format=%cI", source_commit], root)
         head = {"commit": source_commit, "branch": head["branch"], "committed_at": _to_utc_z(at)}
-    build = _run_block(build_status, build_run_id, existing.get("build"),
-                       head=head, run_attempt=run_attempt, observed_at=build_at)
+    build = _run_block(
+        build_status,
+        build_run_id,
+        existing.get("build"),
+        head=head,
+        run_attempt=run_attempt,
+        observed_at=build_at,
+        conclusion=build_conclusion,
+        workflow_name=workflow_name,
+        workflow_id=workflow_id,
+        event_type=event_type,
+        started_at=started_at,
+        completed_at=completed_at,
+        actor=actor,
+        run_url=run_url,
+    )
     test_existing = existing.get("test")
-    test = _run_block(test_status, test_run_id, test_existing,
-                      head=head, run_attempt=run_attempt, observed_at=test_at)
+    test = _run_block(
+        test_status,
+        test_run_id,
+        test_existing,
+        head=head,
+        run_attempt=run_attempt,
+        observed_at=test_at,
+        conclusion=test_conclusion,
+        workflow_name=workflow_name,
+        workflow_id=workflow_id,
+        event_type=event_type,
+        started_at=started_at,
+        completed_at=completed_at,
+        actor=actor,
+        run_url=run_url,
+    )
     if test_status is not None and test_summary is not None:
         test["summary"] = test_summary
     elif test_existing and "summary" in test_existing and test_status is None:
@@ -201,7 +321,7 @@ def build_project_state(
     last_failed_build = existing.get("last_failed_build")
     if build_status == "passed":
         last_successful_build = {"commit": head["commit"], "at": build["at"], "run_id": build_run_id}
-    elif build_status == "failed":
+    elif build_status in ("failed", "timed_out"):
         last_failed_build = {"commit": head["commit"], "at": build["at"], "run_id": build_run_id}
 
     generated_at = max(filter(None, [head.get("committed_at"), build.get("at"), test.get("at")]))
@@ -236,6 +356,17 @@ def make_event(
     evidence_level: str | None = None,
     occurred_at: str | None = None,
     run_attempt: str = "1",
+    conclusion: str | None = None,
+    branch: str | None = None,
+    workflow_name: str | None = None,
+    workflow_id: str | None = None,
+    event_type: str | None = None,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+    actor: str | None = None,
+    run_url: str | None = None,
+    state_version: int | str | None = None,
+    jobs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     occurred_at = occurred_at or now_iso()
     short_commit = commit[:12] if commit else "unknown"
@@ -259,6 +390,21 @@ def make_event(
         event["summary"] = summary
     if evidence_level is not None:
         event["evidence_level"] = evidence_level
+    for k, v in (
+        ("conclusion", conclusion),
+        ("branch", branch),
+        ("workflow_name", workflow_name),
+        ("workflow_id", workflow_id),
+        ("event_type", event_type),
+        ("started_at", started_at),
+        ("completed_at", completed_at),
+        ("actor", actor),
+        ("run_url", run_url),
+        ("state_version", state_version),
+        ("jobs", jobs),
+    ):
+        if v not in (None, "", []):
+            event[k] = v
     return event
 
 
@@ -306,6 +452,8 @@ def render_status_markdown(state: dict[str, Any]) -> str:
         lines.append(f"- Completed: {', '.join(phases['completed']) or 'none'}")
         lines.append(f"- Active: {phases['active'] or 'none'}")
         lines.append(f"- Next: {phases['next'] or 'none'}")
+        if phases.get("blocked"):
+            lines.append(f"- Blocked: {', '.join(phases['blocked'])}")
     sync = state.get("sync", {})
     lines += ["", "## Sync", "", f"- Status: {sync.get('status')}", f"- Source: {sync.get('source')}", f"- Last synced at: {sync.get('last_synced_at')}"]
     return "\n".join(lines) + "\n"

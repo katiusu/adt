@@ -147,12 +147,32 @@ def _collect(args, *, sync):
         existing = core.load_yaml(_project_yaml(root))
         build_id = args.build_run_id or (os.environ.get("GITHUB_RUN_ID") if args.ci else None)
         test_id = args.test_run_id or build_id
-        state = core.build_project_state(root, project_id, repository,
-            generated_by="tools/repo_knowledge collect", sync_source="ci" if args.ci else "local",
-            existing=existing, build_status=args.build_status, build_run_id=build_id,
-            test_status=args.test_status, test_run_id=test_id, test_summary=args.test_summary,
-            run_attempt=args.run_attempt, build_at=args.build_at, test_at=args.test_at,
-            source_commit=args.source_commit)
+        state = core.build_project_state(
+            root,
+            project_id,
+            repository,
+            generated_by="tools/repo_knowledge collect",
+            sync_source="ci" if args.ci else "local",
+            existing=existing,
+            build_status=args.build_status,
+            build_run_id=build_id,
+            test_status=args.test_status,
+            test_run_id=test_id,
+            test_summary=args.test_summary,
+            run_attempt=args.run_attempt,
+            build_at=args.build_at,
+            test_at=args.test_at,
+            source_commit=args.source_commit,
+            build_conclusion=args.build_conclusion,
+            test_conclusion=args.test_conclusion,
+            workflow_name=args.workflow_name,
+            workflow_id=args.workflow_id,
+            event_type=args.event_type,
+            started_at=args.started_at,
+            completed_at=args.completed_at,
+            actor=args.actor,
+            run_url=args.run_url,
+        )
         head = state["head"]
         events = []
         if head["commit"] != (existing or {}).get("head", {}).get("commit"):
@@ -161,9 +181,24 @@ def _collect(args, *, sync):
         for kind in ("build", "test"):
             if getattr(args, kind + "_status") is not None:
                 block = state[kind]
-                events.append(core.make_event(repository, head["commit"], kind, status=block["status"],
-                    summary=block.get("summary"), run_id=block.get("run_id"),
-                    occurred_at=block["at"], run_attempt=block.get("run_attempt", "1")))
+                events.append(core.make_event(
+                    repository,
+                    head["commit"],
+                    kind,
+                    status=block["status"],
+                    summary=block.get("summary"),
+                    run_id=block.get("run_id"),
+                    occurred_at=block["at"],
+                    run_attempt=block.get("run_attempt", "1"),
+                    conclusion=block.get("conclusion"),
+                    workflow_name=block.get("workflow_name"),
+                    workflow_id=block.get("workflow_id"),
+                    event_type=block.get("event_type"),
+                    started_at=block.get("started_at"),
+                    completed_at=block.get("completed_at"),
+                    actor=block.get("actor"),
+                    run_url=block.get("run_url"),
+                ))
         if sync:
             # A sync records a state transition, not every invocation/poll.
             import hashlib
@@ -247,6 +282,15 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--build-at", default=None, help="actual CI evidence timestamp; otherwise first observation is labelled")
         p.add_argument("--test-at", default=None)
         p.add_argument("--source-commit", default=None, help="checked CI source SHA; only generated-only later commits are permitted")
+        p.add_argument("--build-conclusion", choices=core.CONCLUSION_VALUES, default=None)
+        p.add_argument("--test-conclusion", choices=core.CONCLUSION_VALUES, default=None)
+        p.add_argument("--workflow-name", default=None)
+        p.add_argument("--workflow-id", default=None)
+        p.add_argument("--event-type", default=None)
+        p.add_argument("--started-at", default=None)
+        p.add_argument("--completed-at", default=None)
+        p.add_argument("--actor", default=None)
+        p.add_argument("--run-url", default=None)
         p.set_defaults(func=func)
 
     sub.add_parser("verify", help="validate .repo/ against the schemas; report-only").set_defaults(func=cmd_verify)

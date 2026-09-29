@@ -70,7 +70,8 @@
         "source": {
           "enum": [
             "not_configured",
-            ".repo/phases.yaml"
+            ".repo/phases.yaml",
+            "docs/PHASES.md"
           ]
         },
         "completed": {
@@ -90,6 +91,80 @@
             "string",
             "null"
           ]
+        },
+        "blocked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "completed",
+                  "in_progress",
+                  "active",
+                  "blocked",
+                  "not_started",
+                  "deferred"
+                ]
+              },
+              "gate": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "completed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "commit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "run_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "evidence_path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "blocker_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -104,7 +179,29 @@
           "enum": [
             "passed",
             "failed",
+            "cancelled",
+            "skipped",
+            "timed_out",
             "unknown"
+          ]
+        },
+        "conclusion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "success",
+            "failure",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "neutral",
+            "stale",
+            "startup_failure",
+            "unknown",
+            null
           ]
         },
         "run_id": {
@@ -129,6 +226,50 @@
         "run_attempt": {
           "type": "string"
         },
+        "workflow_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "actor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "timestamp_source": {
           "enum": [
             "ci",
@@ -149,7 +290,29 @@
           "enum": [
             "passed",
             "failed",
+            "cancelled",
+            "skipped",
+            "timed_out",
             "unknown"
+          ]
+        },
+        "conclusion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "success",
+            "failure",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "neutral",
+            "stale",
+            "startup_failure",
+            "unknown",
+            null
           ]
         },
         "summary": {
@@ -179,6 +342,50 @@
         },
         "run_attempt": {
           "type": "string"
+        },
+        "workflow_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "actor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_url": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timestamp_source": {
           "enum": [
@@ -212,6 +419,24 @@
             "string",
             "null"
           ]
+        },
+        "run_attempt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_url": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
@@ -238,6 +463,30 @@
             "string",
             "null"
           ]
+        },
+        "run_attempt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "conclusion": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
@@ -253,7 +502,8 @@
           "enum": [
             "ok",
             "pending",
-            "failed"
+            "failed",
+            "never"
           ]
         },
         "last_synced_at": {
@@ -263,10 +513,31 @@
           ],
           "format": "date-time"
         },
+        "last_attempted_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "failure_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_version": {
+          "type": [
+            "integer",
+            "string",
+            "null"
+          ]
+        },
         "source": {
           "enum": [
             "local",
-            "ci"
+            "ci",
+            "manual"
           ]
         }
       },

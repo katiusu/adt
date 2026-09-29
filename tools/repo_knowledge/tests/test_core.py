@@ -141,6 +141,66 @@ class CoreTests(unittest.TestCase):
         self.assertIn("GENERATED", rendered)
         self.assertIn("owner/demo", rendered)
 
+    def test_pass_fail_pass_preserves_both_last_successful_and_last_failed(self) -> None:
+        run100 = core.build_project_state(
+            self.root, "demo", "owner/demo", "test", "ci", existing=None,
+            build_status="passed", build_run_id="100", test_status="passed", test_run_id="100",
+            build_at="2026-09-29T10:00:00Z", test_at="2026-09-29T10:00:00Z",
+        )
+        self.assertEqual(run100["build"]["status"], "passed")
+        self.assertEqual(run100["last_successful_build"]["run_id"], "100")
+        self.assertIsNone(run100["last_failed_build"])
+
+        run101 = core.build_project_state(
+            self.root, "demo", "owner/demo", "test", "ci", existing=run100,
+            build_status="failed", build_run_id="101", test_status="failed", test_run_id="101",
+            build_at="2026-09-29T11:00:00Z", test_at="2026-09-29T11:00:00Z",
+        )
+        self.assertEqual(run101["build"]["status"], "failed")
+        self.assertEqual(run101["last_successful_build"]["run_id"], "100")
+        self.assertEqual(run101["last_failed_build"]["run_id"], "101")
+
+        run102 = core.build_project_state(
+            self.root, "demo", "owner/demo", "test", "ci", existing=run101,
+            build_status="passed", build_run_id="102", test_status="passed", test_run_id="102",
+            build_at="2026-09-29T12:00:00Z", test_at="2026-09-29T12:00:00Z",
+        )
+        self.assertEqual(run102["build"]["status"], "passed")
+        self.assertEqual(run102["last_successful_build"]["run_id"], "102")
+        self.assertEqual(run102["last_failed_build"]["run_id"], "101")
+
+    def test_cancelled_and_skipped_preserve_prior_successful_and_failed_builds(self) -> None:
+        run1 = core.build_project_state(
+            self.root, "demo", "owner/demo", "test", "ci", existing=None,
+            build_status="passed", build_run_id="10",
+        )
+        run2 = core.build_project_state(
+            self.root, "demo", "owner/demo", "test", "ci", existing=run1,
+            build_status="cancelled", build_run_id="11", build_conclusion="cancelled",
+        )
+        self.assertEqual(run2["build"]["status"], "cancelled")
+        self.assertEqual(run2["build"]["conclusion"], "cancelled")
+        self.assertEqual(run2["last_successful_build"]["run_id"], "10")
+        self.assertIsNone(run2["last_failed_build"])
+
+    def test_compute_phases_from_evidence_verified_status(self) -> None:
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "PHASE-00.md").write_text("gate passed\n", encoding="utf-8")
+        head_sha = core.get_head(self.root)["commit"]
+        core.dump_yaml(self.root / ".repo" / "phases.yaml", {
+            "phases": [
+                {"name": "PHASE-00: Foundation", "status": "completed", "evidence_path": "docs/PHASE-00.md", "commit": head_sha},
+                {"name": "PHASE-01: Core", "status": "in_progress"},
+                {"name": "PHASE-02: Blocked Feature", "status": "blocked"},
+            ]
+        })
+        phases = core.compute_phases(self.root)
+        self.assertEqual(phases["source"], ".repo/phases.yaml")
+        self.assertEqual(phases["completed"], ["PHASE-00: Foundation"])
+        self.assertEqual(phases["active"], "PHASE-01: Core")
+        self.assertEqual(phases["next"], "PHASE-02: Blocked Feature")
+        self.assertEqual(phases["blocked"], ["PHASE-02: Blocked Feature"])
+
 
 if __name__ == "__main__":
     unittest.main()
