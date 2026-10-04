@@ -31,6 +31,9 @@ jobs:
       - name: Run install-profile tests
         run: ./tests/test_profile.sh
 
+      - name: Run CLI-argument tests
+        run: ./tests/test_cli_args.sh
+
   build:
     name: Build (Linux ARM64)
     runs-on: ubuntu-24.04-arm
