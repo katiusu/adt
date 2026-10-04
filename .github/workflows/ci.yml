@@ -28,6 +28,9 @@ jobs:
       - name: Run detect_binary_arch tests
         run: ./tests/test_arch_detection.sh
 
+      - name: Run release-download integrity tests
+        run: ./tests/test_release_integrity.sh
+
       - name: Run install-profile tests
         run: ./tests/test_profile.sh
 
