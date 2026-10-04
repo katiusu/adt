@@ -275,6 +275,9 @@ Project versions track Android build-tools versions:
 - Asset naming convention, shared by `artifacts/` and release uploads: `build-tools-<version>-linux-arm64.tar.gz` and `platform-tools-<version>-linux-arm64.tar.gz`.
 - Installer order for a verified version: (1) checked-in `artifacts/` tarball, SHA256-verified against `artifacts/SHA256SUMS`; (2) GitHub Release download if a `release` field exists; (3) source build.
 - When adding a new validated artifact, commit the tarball under `artifacts/` and append its SHA256 line to `artifacts/SHA256SUMS` in the same commit.
+- **`configure_gradle` never overwrites a deliberate local shim.** If `android.aapt2FromMavenOverride` already points outside `$SDK_ROOT`, it is kept (with a warning and a timestamped backup of `gradle.properties`); `./setup.sh setup-gradle --force` is the explicit opt-in.
+- **`--sdk-root <path>` is honoured by the install commands and by the read-only `doctor`/`status`/`cleanup`.** Without it `detect_sdk_root` guesses, which is how a diagnostic can silently report on the wrong SDK.
+- **Covered by tests:** `tests/test_cli_args.sh` (run by CI) exercises the `--sdk-root` handling and the Gradle-override protection.
 
 ### Patch Resolution Order
 
@@ -344,9 +347,11 @@ deployagent.inc, deployagentscript.inc, etc:
 | `install-profile [name]` | Install a named bundle of already-verified versions from `versions.json`'s `profiles` key by calling `install-build-tools`/`install-ndk`/`install-platforms` in sequence — builds/verifies nothing new. Default/only profile: `validated` (build-tools 35.0.2 + NDK 27.2.12479018 + platforms;android-36 — see `docs/REAL_DEVICE_BUILD_VALIDATION.md`) |
 | `build-build-tools <ver>` | Build from AOSP source |
 | `build-platform-tools <ver>` | Build from AOSP source |
-| `doctor` | Diagnose setup (checks arch per build-tools version) |
+| `doctor` | Diagnose setup: architecture of every build-tools version, platform-tools binaries, platforms, NDK/CMake shims, and the Gradle override (classifying a custom shim) |
 | `status` | Show what's installed |
-| `setup-gradle` | Configure `android.aapt2FromMavenOverride` |
+| `setup-gradle [--force]` | Configure `android.aapt2FromMavenOverride`. Keeps an existing override that lives outside `$SDK_ROOT` (warns, backs up the file); `--force` rewrites it |
+
+Install commands and `doctor`/`status`/`cleanup` accept `--sdk-root <path>`; the read-only three take no other options.
 
 ## Troubleshooting
 

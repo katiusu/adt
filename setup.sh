@@ -1105,6 +1105,14 @@ cmd_build_all() {
 # ── setup-gradle ───────────────────────────────────────────────────────────────
 
 cmd_setup_gradle() {
+    local force=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            --sdk-root) SDK_ROOT="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
     detect_sdk_root
 
     # Find latest build-tools with ARM64 aapt2
@@ -1123,13 +1131,37 @@ cmd_setup_gradle() {
         die "No ARM64 build-tools with aapt2 found in ${bt_dir}.\n  Install build-tools first: $0 install-build-tools <version>"
     fi
 
-    configure_gradle "$latest"
-    ok "Gradle configured with aapt2 at: ${latest}"
+    configure_gradle "$latest" "$force"
+    if [[ "${ADT_GRADLE_OVERRIDE_KEPT:-0}" == "1" ]]; then
+        info "Gradle override left as-is (see the warning above)."
+        info "  Force it with: $0 setup-gradle --force"
+    else
+        ok "Gradle configured with aapt2 at: ${latest}"
+    fi
 }
 
 # ── doctor ─────────────────────────────────────────────────────────────────────
 
+# Read-only commands (doctor/status/cleanup) accept the same "--sdk-root <path>"
+# flag as the install commands. Without this they silently fell back to
+# detect_sdk_root's default, so `doctor --sdk-root /opt/android-sdk` reported on
+# an empty ~/android-sdk instead — exactly the kind of answer that sends an agent
+# down the wrong path. Extra arguments are ignored: these commands have no others.
+take_sdk_root_arg() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --sdk-root)
+                [[ -n "${2:-}" ]] || die "--sdk-root requires a path"
+                SDK_ROOT="$2"
+                shift 2
+                ;;
+            *) shift ;;
+        esac
+    done
+}
+
 cmd_doctor() {
+    take_sdk_root_arg "$@"
     detect_sdk_root
 
     header "Android SDK ARM64 - Diagnostic Check"
@@ -1332,11 +1364,17 @@ cmd_doctor() {
     if [[ -f "$gradle_props" ]] && grep -q "^android.aapt2FromMavenOverride=" "$gradle_props"; then
         local aapt2_path
         aapt2_path=$(grep "^android.aapt2FromMavenOverride=" "$gradle_props" | cut -d= -f2)
-        if [[ -x "$aapt2_path" ]]; then
-            ok "Gradle aapt2 override: $aapt2_path"
-        else
+        if [[ ! -e "$aapt2_path" ]]; then
             warn "Gradle aapt2 override points to missing file: $aapt2_path"
             issues=$((issues+1))
+        elif [[ "$aapt2_path" == "$SDK_ROOT/"* ]]; then
+            ok "Gradle aapt2 override: $aapt2_path (SDK build-tools)"
+        elif [[ "$(detect_binary_arch "$aapt2_path")" == "x86_64" ]]; then
+            err "Gradle aapt2 override is x86_64: $aapt2_path"
+            echo -e "    ${DIM}Fix:  $0 setup-gradle --force   (point AGP at an ARM64 aapt2)${NC}"
+            issues=$((issues+1))
+        else
+            ok "Gradle aapt2 override: $aapt2_path (custom shim, $(detect_binary_arch "$aapt2_path"))"
         fi
     else
         warn "Gradle aapt2 override not configured"
@@ -1375,6 +1413,7 @@ cmd_doctor() {
 # ── status ─────────────────────────────────────────────────────────────────────
 
 cmd_status() {
+    take_sdk_root_arg "$@"
     detect_sdk_root
 
     header "Android SDK ARM64 - Status"
@@ -1473,7 +1512,12 @@ PROPS
 
 configure_gradle() {
     local aapt2_path="$1"
+    local force="${2:-}"
     local gradle_props="$HOME/.gradle/gradle.properties"
+    local backup="" existing=""
+
+    # Callers report the outcome; see cmd_setup_gradle.
+    ADT_GRADLE_OVERRIDE_KEPT=0
 
     info "Configuring Gradle aapt2 override..."
     echo "  aapt2:  ${aapt2_path}"
@@ -1481,10 +1525,31 @@ configure_gradle() {
     mkdir -p "$(dirname "$gradle_props")"
 
     if [[ -f "$gradle_props" ]]; then
+        backup="${gradle_props}.bak-$(date +%Y%m%d-%H%M%S)"
+        cp "$gradle_props" "$backup"
+
+        # A pre-existing override that does not live inside this SDK is somebody's
+        # deliberate shim (e.g. an aapt2 wrapper that rewrites arguments for this
+        # AGP/aapt2 combination). Replacing it silently breaks their builds in
+        # ways that look unrelated, so keep it unless the caller forces the change.
+        existing="$(sed -n 's/^android\.aapt2FromMavenOverride=//p' "$gradle_props" | tail -n 1)"
+        if [[ -n "$existing" && "$existing" != "$SDK_ROOT/"* && "$force" != "--force" ]]; then
+            ADT_GRADLE_OVERRIDE_KEPT=1
+            warn "Kept the existing aapt2 override: ${existing}"
+            echo -e "    ${DIM}It is outside ${SDK_ROOT}, so it was not replaced by ${aapt2_path}.${NC}"
+            echo -e "    ${DIM}Backup: ${backup}   Force a rewrite: $0 setup-gradle --force${NC}"
+            return 0
+        fi
+
         sed -i '/^android\.aapt2FromMavenOverride=/d' "$gradle_props"
     fi
+
     echo "android.aapt2FromMavenOverride=${aapt2_path}" >> "$gradle_props"
     ok "Gradle: ${gradle_props}"
+    if [[ -n "$backup" ]]; then
+        info "  previous file backed up to: ${backup}"
+    fi
+    return 0
 }
 
 create_ndk_shim() {
@@ -1948,6 +2013,7 @@ sweep_item() {
 }
 
 cmd_cleanup() {
+    take_sdk_root_arg "$@"
     detect_sdk_root
     header "Temporary cleanup"
     sweep_item "$SDK_ROOT/.temp" "sdkmanager temp"
