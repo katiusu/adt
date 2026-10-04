@@ -1221,6 +1221,7 @@ cmd_doctor() {
                         ;;
                     x86_64)
                         err "  $bin: x86_64 (won't run!)"
+                        echo -e "    ${DIM}Fix:  $0 install-platform-tools <version>${NC}"
                         issues=$((issues+1))
                         ;;
                     *)
@@ -1361,6 +1362,13 @@ cmd_doctor() {
     else
         info "Flutter: not found (optional)"
     fi
+
+    # ARM64 overwrite hazard: sdkmanager only knows Google's linux-x86_64
+    # payloads, so "updating" build-tools or platform-tools with it silently
+    # replaces working ARM64 binaries with ones that cannot exec here.
+    echo ""
+    info "Reminder: do not update build-tools/platform-tools with sdkmanager on ARM64 —"
+    info "          it installs x86_64 binaries. Re-run install-build-tools / install-platform-tools instead."
 
     # Summary
     echo ""
@@ -1622,11 +1630,172 @@ ensure_cmdline_tools() {
 run_sdkmanager() {
     local sdkmanager="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
     [[ -x "$sdkmanager" ]] || die "sdkmanager not found. Run: $0 install-cmd-tools"
+
+    # ARM64 guard. sdkmanager serves Google's linux-x86_64 payloads only, and for
+    # these two components that means replacing working ARM64 binaries with ones
+    # that cannot execute on this host — the failure is invisible until something
+    # tries to run them. Platforms/NDK/CMake payloads are arch-neutral or handled
+    # by the shims, so only these two are refused at this single choke point
+    # (every caller, including bootstrap and profiles, goes through here).
+    local arg=""
+    for arg in "$@"; do
+        case "$arg" in
+            build-tools\;*)
+                die "'build-tools' must not be installed with sdkmanager on ARM64 (x86_64 payload).\n  Use: $0 install-build-tools <version>   (see '$0 list-versions')" ;;
+            platform-tools|platform-tools\;*)
+                die "'platform-tools' must not be installed with sdkmanager on ARM64 (x86_64 payload).\n  Use: $0 install-platform-tools <version>   (see '$0 list-versions')" ;;
+        esac
+    done
+
     "$sdkmanager" --sdk_root="$SDK_ROOT" "$@"
 }
 
 accept_licenses() {
     yes 2>/dev/null | run_sdkmanager --licenses >/dev/null 2>&1 || true
+}
+
+# ── Release-download integrity (ARM64 host) ───────────────────────────────────
+#
+# install_local_artifact has always verified artifacts/SHA256SUMS, but a
+# *downloaded* GitHub Release asset was trusted blindly — and under this
+# project's ARM64 PRoot, curl can also fail on a perfectly healthy URL when its
+# error text is thrown away. Both gaps let a bad payload reach $SDK_ROOT and only
+# surface later inside Gradle:
+#   * an x86_64 tarball installs just as cleanly as an arm64 one (same names,
+#     same exec bits) and only explodes at exec time — the detect_binary_arch
+#     trap documented above, and
+#   * a failed transfer used to print nothing but "Download failed".
+# The helpers below close that: real transfer errors, SHA256 against the
+# release's own digest, and payload architecture *before* anything is copied.
+
+# Print "sha256:<hex>" for one release asset, from the GitHub API asset digest.
+# Prints nothing when the API is unreachable or the asset carries no digest —
+# callers then warn instead of dying, so offline installs keep working.
+fetch_release_asset_digest() {
+    local release_tag="$1" asset_name="$2"
+    command -v curl >/dev/null 2>&1 || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+
+    local auth=()
+    [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    [[ -n "${GH_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GH_TOKEN}")
+
+    local json=""
+    json="$(curl -fsSL --connect-timeout 20 --max-time 60 \
+        -H 'Accept: application/vnd.github+json' "${auth[@]}" \
+        "https://api.github.com/repos/${REPO}/releases/tags/${release_tag}" 2>/dev/null)" || return 0
+    [[ -n "$json" ]] || return 0
+
+    ADT_RELEASE_JSON="$json" ADT_ASSET_NAME="$asset_name" python3 -c '
+import json, os, sys
+try:
+    release = json.loads(os.environ["ADT_RELEASE_JSON"])
+except Exception:
+    sys.exit(0)
+for asset in release.get("assets") or []:
+    if asset.get("name") == os.environ["ADT_ASSET_NAME"]:
+        digest = (asset.get("digest") or "").strip()
+        if digest.startswith("sha256:"):
+            print(digest)
+        break
+' 2>/dev/null || true
+}
+
+# Download one URL with retries and a *visible* failure. Returns non-zero on
+# failure; falls back to wget because a PRoot curl can fail where wget succeeds.
+download_asset() {
+    local url="$1" out="$2"
+    local log="${out}.log"
+    local progress=() retry_all=()
+    # A progress bar writes escape codes into every non-TTY consumer (agent logs,
+    # CI) and tells us nothing the error log does not.
+    [[ -t 1 ]] && progress=(--progress-bar)
+
+    if command -v curl >/dev/null 2>&1; then
+        curl --retry-all-errors --version >/dev/null 2>&1 && retry_all=(--retry-all-errors)
+        if curl -fSL --retry 3 --retry-delay 2 "${retry_all[@]}" \
+            --connect-timeout 20 --max-time 900 "${progress[@]}" \
+            -o "$out" "$url" 2>"$log"; then
+            rm -f "$log"
+            return 0
+        fi
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        warn "curl could not fetch $(basename "$out") — retrying with wget..."
+        if wget -q --tries=3 --timeout=60 -O "$out" "$url" 2>>"$log"; then
+            rm -f "$log"
+            return 0
+        fi
+    fi
+    err "Download failed: $url"
+    if [[ -s "$log" ]]; then
+        echo -e "    ${DIM}--- transfer log (last 5 lines) ---${NC}"
+        tail -n 5 "$log" | sed 's/^/    /'
+    fi
+    return 1
+}
+
+# Verify a downloaded archive against the release's published SHA256.
+verify_asset_digest() {
+    local archive="$1" expected="$2"
+    local actual=""
+
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    actual="sha256:$(sha256sum "$archive" | awk '{print $1}')"
+
+    if [[ -z "$expected" ]]; then
+        warn "No release digest available for $(basename "$archive") — installing unverified."
+        info "  sha256: ${actual#sha256:}"
+        return 0
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        die "SHA256 mismatch for $(basename "$archive"):\n  expected ${expected}\n  got      ${actual}\n  Refusing to install — re-download, or report a corrupted release asset."
+    fi
+    ok "SHA256 verified against the GitHub release digest."
+    return 0
+}
+
+# Check an extracted payload's architecture before a single file reaches
+# $SDK_ROOT. A wheel of binaries that cannot exec here is fatal; text shims are
+# fine (they delegate); an unknown type is reported but not fatal.
+verify_payload_arch() {
+    local tmpdir="$1" component="$2"
+    local bin="" src="" arch="" found=0
+    local wrong=() foreign=()
+
+    local bins_ref
+    if [[ "$component" == "build-tools" ]]; then
+        bins_ref=("${BUILD_TOOLS_BINS[@]}")
+    else
+        bins_ref=("${PLATFORM_TOOLS_BINS[@]}")
+    fi
+
+    for bin in "${bins_ref[@]}"; do
+        # The release decides how it nests its payload: flat "build-tools/<bin>",
+        # or a full tree such as "android-sdk-linux-arm64/build-tools/<bin>".
+        # Search the whole extraction so a missed binary can never turn into a
+        # silently skipped check.
+        src="$(find "$tmpdir" -type f -name "$bin" -print -quit 2>/dev/null || true)"
+        [[ -n "$src" ]] || continue
+        found=$((found+1))
+        arch="$(detect_binary_arch "$src")"
+        case "$arch" in
+            arm64|script) : ;;
+            x86_64)       wrong+=("$bin") ;;
+            *)            foreign+=("$bin (${arch})") ;;
+        esac
+    done
+
+    if [[ ${#wrong[@]} -gt 0 ]]; then
+        die "Refusing to install: $(basename "$tmpdir") payload contains x86_64 binaries (${wrong[*]}).\n  They cannot execute on this ARM64 host; $SDK_ROOT was left untouched.\n  Use a verified ARM64 version: $0 list-versions"
+    fi
+    if [[ ${#foreign[@]} -gt 0 ]]; then
+        warn "Unrecognised architecture: ${foreign[*]}"
+    fi
+    if [[ $found -gt 0 ]]; then
+        ok "Payload architecture OK: ${found} ARM64-compatible binary/binaries."
+    fi
+    return 0
 }
 
 # Install from a checked-in, validated artifact in artifacts/ (offline path).
@@ -1658,6 +1827,10 @@ install_local_artifact() {
     local tmpdir
     tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/adt-install.XXXXXX")"
     tar -xzf "$artifact" -C "$tmpdir" || { rm -rf "$tmpdir"; die "Could not extract ${artifact}"; }
+
+    # SHA256 came from artifacts/SHA256SUMS above; this checks what the bytes
+    # actually are, so an x86_64 payload never reaches $SDK_ROOT.
+    verify_payload_arch "$tmpdir" "$component"
 
     local bins_ref
     if [[ "$component" == "build-tools" ]]; then
@@ -1737,7 +1910,7 @@ download_and_install_release() {
     for tarball in "${tarballs[@]}"; do
         local url="https://github.com/${REPO}/releases/download/${release_tag}/${tarball}"
         info "Trying ${tarball}..."
-        if curl -fSL --progress-bar -o "$tmpdir/$tarball" "$url" 2>/dev/null; then
+        if download_asset "$url" "$tmpdir/$tarball"; then
             downloaded="$tarball"
             break
         fi
@@ -1748,8 +1921,16 @@ download_and_install_release() {
         die "Download failed. Check: ${REPO_URL}/releases/tag/${release_tag}"
     fi
 
+    # Integrity first: the archive is verified against the release's own digest
+    # and its payload architecture before $SDK_ROOT is touched at all.
+    local expected_digest=""
+    expected_digest="$(fetch_release_asset_digest "$release_tag" "$downloaded")"
+    verify_asset_digest "$tmpdir/$downloaded" "$expected_digest"
+
     info "Extracting ${downloaded}..."
-    tar -xzf "$tmpdir/$downloaded" -C "$tmpdir"
+    tar -xzf "$tmpdir/$downloaded" -C "$tmpdir" || { rm -rf "$tmpdir"; die "Could not extract ${downloaded} — not a valid gzip tarball."; }
+
+    verify_payload_arch "$tmpdir" "$component"
 
     mkdir -p "$dest_dir"
     info "Installing binaries to: ${BOLD}${dest_dir}${NC}"
@@ -1786,6 +1967,9 @@ download_and_install_release() {
     done
 
     rm -rf "$tmpdir"
+    if [[ $installed -eq 0 ]]; then
+        die "Release ${release_tag} contained no expected ${component} binaries — archive layout mismatch."
+    fi
     ok "Installed ${installed} binaries."
 }
 
